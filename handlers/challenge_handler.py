@@ -118,9 +118,15 @@ class AddCTFCommand(Command):
 
         # Validate that the channel was successfully created.
         if not response['ok']:
-            raise InvalidCommand("\"{}\" channel creation failed:\nError : {}".format(name, response['error']))
-
-        ctf_channel_id = response['channel']['id']
+            response = slack_wrapper.get_channel_info(channel_id, is_private=True)
+            if not response['ok']:
+                raise InvalidCommand("\"{}\" channel creation failed:\nError : {}".format(name, response['error']))
+            else:
+                ctf_channel_id = response['group']['id']
+                ctf_channel_name = response['group']['name']
+        else:
+            ctf_channel_id = response['channel']['id']
+            ctf_channel_name = response['channel']['name']
 
         # New CTF object
         ctf = CTF(ctf_channel_id, name, long_name)
@@ -144,7 +150,7 @@ class AddCTFCommand(Command):
                 slack_wrapper.invite_user(invite_user_id, ctf_channel_id)
 
         # Notify people of new channel
-        message = "Created channel #{}".format(response['channel']['name']).strip()
+        message = "Created channel #{}".format(ctf_channel_name).strip()
         slack_wrapper.post_message(channel_id, message)
 
 
