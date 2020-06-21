@@ -71,6 +71,7 @@ class RemoveChallengeTagCommand(Command):
             if dirty:
                 save_challenge(ChallengeHandler.DB, challenge)
 
+
 class RollCommand(Command):
     """Roll the dice. ;)"""
 
@@ -110,7 +111,10 @@ class AddCTFCommand(Command):
             raise InvalidCommand("Add CTF failed: Invalid characters for CTF name found.")
 
         # Create the channel
-        response = slack_wrapper.create_channel(name)
+        if long_name != channel_id:
+            response = slack_wrapper.create_channel(name)
+        else:
+            response = slack_wrapper.get_channel_info(channel_id)
 
         # Validate that the channel was successfully created.
         if not response['ok']:
@@ -281,11 +285,29 @@ class AddChallengeCommand(Command):
         response = slack_wrapper.create_channel(channel_name, is_private=True)
 
         # Validate that the channel was created successfully
-        if not response['ok']:
-            raise InvalidCommand("\"{}\" channel creation failed:\nError : {}".format(channel_name, response['error']))
+        if response['ok']:
+            challenge_channel_id = response['group']['id']
+        else:
+            # If it wasn't then try and hijack whatever channel goes by that name
+            channels = slack_wrapper.get_public_channels()['channels']
+            channel = next((i for i in channels if i['name'] == channel_name), None)
+            if channel:
+                response = slack_wrapper.get_channel_info(channel['id'])
+                challenge_channel_id = channel['id']
+            else:
+                channels = slack_wrapper.get_private_channels()['groups']
+                channel = None
+                for chan in channels:
+                    if chan['name'] == channel_name:
+                        channel = chan
+                if channel:
+                    response = slack_wrapper.get_channel_info(channel['id'])
+                    challenge_channel_id = channel['id']
+                else:
+                    # Raise iff that failed too
+                    raise InvalidCommand("\"{}\" channel creation failed:\nError : {}".format(channel_name, response['error']))
 
         # Add purpose tag for persistence
-        challenge_channel_id = response['group']['id']
         purpose = dict(ChallengeHandler.CHALL_PURPOSE)
         purpose['name'] = name
         purpose['ctf_id'] = ctf.channel_id
