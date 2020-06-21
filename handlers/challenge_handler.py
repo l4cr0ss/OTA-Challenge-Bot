@@ -111,24 +111,31 @@ class AddCTFCommand(Command):
             raise InvalidCommand("Add CTF failed: Invalid characters for CTF name found.")
 
         # Create the channel
-        if long_name != channel_id:
-            response = slack_wrapper.create_channel(name)
-        else:
-            response = slack_wrapper.get_channel_info(channel_id)
-
-        # Validate that the channel was successfully created.
-        if not response['ok']:
-            response = slack_wrapper.get_channel_info(channel_id, is_private=True)
-            if not response['ok']:
-                raise InvalidCommand("\"{}\" channel creation failed:\nError : {}".format(name, response['error']))
-            else:
-                ctf_channel_id = response['group']['id']
-                ctf_channel_name = response['group']['name']
-                is_private = True
-        else:
+        response = slack_wrapper.create_channel(name)
+        if response['ok']:
+            # Channel was created successfully
             ctf_channel_id = response['channel']['id']
             ctf_channel_name = response['channel']['name']
             is_private = False
+        else:
+            # Try and find the existing channel
+            response = slack_wrapper.get_channel_info(channel_id)
+            if response['ok']:
+                # Found it!
+                ctf_channel_id = response['channel']['id']
+                ctf_channel_name = response['channel']['name']
+                is_private = False
+            else:
+                # Try again, checking if it's a private channel
+                response = slack_wrapper.get_channel_info(channel_id, is_private=True)
+                if response['ok']:
+                    # Found it!
+                    ctf_channel_id = response['group']['id']
+                    ctf_channel_name = response['group']['name']
+                    is_private = True
+                else:
+                    # Give up
+                    raise InvalidCommand("\"{}\" channel creation failed:\nError : {}".format(name, response['error']))
 
         # New CTF object
         ctf = CTF(ctf_channel_id, name, long_name)
@@ -217,6 +224,12 @@ class RenameCTFCommand(Command):
 
         if not ctf:
             raise InvalidCommand("Rename CTF failed: CTF '{}' not found.".format(old_name))
+        else:
+            response = slack_wrapper.get_channel_info(ctf.channel_id)
+            if response['ok']:
+                is_private = False
+            else:
+                is_private=True
 
         ctflen = len(new_name)
 
@@ -238,13 +251,13 @@ class RenameCTFCommand(Command):
         slack_wrapper.post_message(ctf.channel_id, text)
 
         # Rename the ctf channel
-        response = slack_wrapper.rename_channel(ctf.channel_id, new_name)
+        response = slack_wrapper.rename_channel(ctf.channel_id, new_name, is_private)
 
         if not response['ok']:
             raise InvalidCommand("\"{}\" channel rename failed:\nError : {}".format(old_name, response['error']))
 
         # Update channel purpose
-        slack_wrapper.update_channel_purpose_name(ctf.channel_id, new_name)
+        slack_wrapper.update_channel_purpose_name(ctf.channel_id, new_name, is_private)
 
         # Update database
         update_ctf_name(ChallengeHandler.DB, ctf.channel_id, new_name)
