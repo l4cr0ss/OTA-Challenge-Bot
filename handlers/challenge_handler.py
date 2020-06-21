@@ -124,9 +124,11 @@ class AddCTFCommand(Command):
             else:
                 ctf_channel_id = response['group']['id']
                 ctf_channel_name = response['group']['name']
+                is_private = True
         else:
             ctf_channel_id = response['channel']['id']
             ctf_channel_name = response['channel']['name']
+            is_private = False
 
         # New CTF object
         ctf = CTF(ctf_channel_id, name, long_name)
@@ -137,7 +139,7 @@ class AddCTFCommand(Command):
         pickle.dump(ctfs, open(ChallengeHandler.DB, "wb"))
 
         # Add purpose tag for persistance
-        ChallengeHandler.update_ctf_purpose(slack_wrapper, ctf)
+        ChallengeHandler.update_ctf_purpose(slack_wrapper, ctf, is_private)
 
         # Invite user
         slack_wrapper.invite_user(user_id, ctf_channel_id)
@@ -994,7 +996,7 @@ class ChallengeHandler(BaseHandler):
         }
 
     @staticmethod
-    def update_ctf_purpose(slack_wrapper, ctf):
+    def update_ctf_purpose(slack_wrapper, ctf, is_private):
         """
         Update the purpose for the ctf channel.
         """
@@ -1008,7 +1010,7 @@ class ChallengeHandler(BaseHandler):
         purpose["finished"] = ctf.finished
         purpose["finished_on"] = ctf.finished_on
 
-        slack_wrapper.set_purpose(ctf.channel_id, purpose)
+        slack_wrapper.set_purpose(ctf.channel_id, purpose, is_private)
 
     @staticmethod
     def update_database_from_slack(slack_wrapper):
