@@ -1,8 +1,20 @@
 import json
-import time
+from typing import Any
 
-from slackclient import SlackClient
+from slack_sdk import WebClient
+from slack_sdk.web import SlackResponse
+
 from util.util import load_json
+
+
+def validate_response(func):
+    def wrapper():
+        resp: SlackResponse = func()
+        if resp:
+            resp.validate()
+        return resp
+
+    return wrapper
 
 
 class SlackWrapper:
@@ -10,162 +22,177 @@ class SlackWrapper:
     Slack API wrapper
     """
 
-    def __init__(self, api_key):
+    def __init__(self, slack_token):
         """
         SlackWrapper constructor.
         Connect to the real-time messaging API and
         load the bot's login data.
         """
-        self.api_key = api_key
-        self.client = SlackClient(self.api_key)
-        self.connected = self.client.rtm_connect(auto_reconnect=True)
-        self.server = None
-        self.username = None
-        self.user_id = None
+        self.client = WebClient(slack_token)
 
-        if self.connected:
-            self.server = self.client.server
-            self.username = self.server.username
-            self.user_id = self.server.login_data.get("self").get("id")
+        identity = self.client.users_identity()
+        identity.validate()
 
-    def read(self):
-        """Read from the real-time messaging API."""
-        return self.client.rtm_read()
+        self.username = identity['user']['name']
+        self.user_id = identity['user']['id']
 
-    def invite_user(self, user, channel, is_private=False):
+    @validate_response
+    def invite_user(self, user: str, channel: str) -> SlackResponse:
         """
         Invite a user to a given channel.
         """
 
-        api_call = "groups.invite" if is_private else "channels.invite"
-        return self.client.api_call(api_call, channel=channel, user=user)
+        return self.client.conversations_invite(channel=channel, users=user)
 
-    def set_purpose(self, channel, purpose, is_private=False):
+    @validate_response
+    def set_purpose(self, channel: str, purpose: str) -> SlackResponse:
         """
         Set the purpose of a given channel.
         """
 
-        api_call = "groups.setPurpose" if is_private else "channels.setPurpose"
-        return self.client.api_call(api_call, purpose=purpose, channel=channel)
+        return self.client.conversations_setPurpose(channel=channel, purpose=purpose)
 
-    def set_topic(self, channel, topic, is_private=False):
+    @validate_response
+    def set_topic(self, channel: str, topic: str) -> SlackResponse:
         """Set the topic of a given channel."""
 
-        api_call = "groups.setTopic" if is_private else "channels.setTopic"
-        return self.client.api_call(api_call, topic=topic, channel=channel)
+        return self.client.conversations_setTopic(channel=channel, topic=topic)
 
-    def get_members(self):
+    @validate_response
+    def get_members(self) -> SlackResponse:
         """
         Return a list of all members.
         """
-        return self.client.api_call("users.list", presence=True)
 
-    def get_member(self, user_id):
+        return self.client.users_list()
+
+    @validate_response
+    def get_member(self, user_id: str) -> SlackResponse:
         """
         Return a member for a given user_id.
         """
-        return self.client.api_call("users.info", user=user_id)
 
-    def create_channel(self, name, is_private=False):
+        return self.client.users_info(user=user_id)
+
+    @validate_response
+    def create_channel(self, name: str, is_private=False) -> SlackResponse:
         """
         Create a channel with a given name.
         """
-        api_call = "groups.create" if is_private else "channels.create"
-        return self.client.api_call(api_call, name=name, validate=False)
 
-    def rename_channel(self, channel_id, new_name, is_private=False):
+        return self.client.conversations_create(name=name, is_private=is_private)
+
+    @validate_response
+    def rename_channel(self, channel_id: str, new_name: str) -> SlackResponse:
         """
         Rename an existing channel.
         """
-        api_call = "groups.rename" if is_private else "channels.rename"
 
-        return self.client.api_call(api_call, channel=channel_id, name=new_name, validate=False)
+        return self.client.conversations_rename(channel=channel_id, name=new_name)
 
-    def get_channel_info(self, channel_id, is_private=False):
+    @validate_response
+    def get_channel_info(self, channel_id: str) -> SlackResponse:
         """
         Return the channel info of a given channel ID.
         """
 
-        api_call = "groups.info" if is_private else "channels.info"
-        return self.client.api_call(api_call, channel=channel_id)
+        return self.client.conversations_info(channel=channel_id)
 
-    def get_channel_members(self, channel_id, is_private=False):
+    @validate_response
+    def get_channel_members(self, channel_id: str) -> Any:
         """ Return list of member ids in a given channel ID. """
 
-        return self.get_channel_info(channel_id, is_private)['channel']['members']
+        return self.get_channel_info(channel_id).data['channel']['members']
 
-    def update_channel_purpose_name(self, channel_id, new_name, is_private=False):
+    @validate_response
+    def update_channel_purpose_name(self, channel_id: str, new_name: str) -> SlackResponse:
         """
         Updates the channel purpose 'name' field for a given channel ID.
         """
 
-        # Update channel purpose
-        channel_info = self.get_channel_info(channel_id, is_private)
-        key = "group" if is_private else "channel"
+        channel_info = self.get_channel_info(channel_id)
 
-        if channel_info:
-            purpose = load_json(channel_info[key]['purpose']['value'])
-            purpose['name'] = new_name
+        purpose = load_json(channel_info['channel']['purpose']['value'])
+        purpose['name'] = new_name
 
-            self.set_purpose(channel_id, json.dumps(purpose), is_private)
+        return self.set_purpose(channel_id, json.dumps(purpose))
 
-    def post_message(self, channel_id, text, timestamp="", parse="full"):
+    @validate_response
+    def post_message(self, channel_id: str, text: str, timestamp="", parse="full") -> SlackResponse:
         """
         Post a message in a given channel.
         channel_id can also be a user_id for private messages.
         Add timestamp for replying to a specific message.
         """
-        self.client.api_call("chat.postMessage", channel=channel_id,
-                             text=text, as_user=True, parse=parse, thread_ts=timestamp)
 
-    def post_message_with_react(self, channel_id, text, reaction, parse="full"):
+        return self.client.chat_postMessage(channel=channel_id, text=text, as_user=True, parse=parse,
+                                            thread_ts=timestamp)
+
+    @validate_response
+    def post_message_with_react(self, channel_id: str, text: str, reaction: str, parse="full"):
         """Post a message in a given channel and add the specified reaction to it."""
-        result = self.client.api_call("chat.postMessage", channel=channel_id, text=text,
-                                      as_user=True, parse=parse)
 
-        if result["ok"]:
-            self.client.api_call("reactions.add", channel=channel_id, name=reaction, timestamp=result["ts"])
+        result = self.post_message(channel_id, text, "", parse)
 
-    def get_message(self, channel_id, timestamp):
+        self.client.reactions_add(channel=channel_id, name=reaction, timestamp=result["ts"])
+
+    @validate_response
+    def get_message(self, channel_id: str, timestamp: str) -> SlackResponse:
         """Retrieve a message from the channel with the specified timestamp."""
-        return self.client.api_call("channels.history", channel=channel_id, latest=timestamp, count=1, inclusive=True)
 
-    def update_message(self, channel_id, msg_timestamp, text, parse="full"):
+        return self.client.conversations_history(channel=channel_id, latest=timestamp, limit=1, inclusive=True)
+
+    @validate_response
+    def update_message(self, channel_id: str, msg_timestamp: str, text: str, parse="full") -> SlackResponse:
         """Update a message, identified by the specified timestamp with a new text."""
-        self.client.api_call("chat.update", channel=channel_id, text=text, ts=msg_timestamp, as_user=True, parse=parse)
 
-    def get_public_channels(self):
+        return self.client.chat_update(channel=channel_id, ts=msg_timestamp, text=text, as_user=True, parse=parse)
+
+    @validate_response
+    def get_public_channels(self) -> SlackResponse:
         """Fetch all public channels."""
-        return self.client.api_call("channels.list")
 
-    def get_private_channels(self):
+        return self.client.conversations_list(types="public_channel")
+
+    @validate_response
+    def get_private_channels(self) -> SlackResponse:
         """Fetch all private channels in which the user participates."""
-        return self.client.api_call("groups.list")
 
-    def archive_private_channel(self, channel_id):
+        return self.client.conversations_list(types="private_channel")
+
+    @validate_response
+    def archive_private_channel(self, channel_id: str) -> SlackResponse:
         """Archive a private channel"""
-        return self.client.api_call("groups.archive", channel=channel_id)
 
-    def archive_public_channel(self, channel_id):
+        return self.client.conversations_archive(channel=channel_id)
+
+    @validate_response
+    def archive_public_channel(self, channel_id: str) -> SlackResponse:
         """Archive a public channel"""
-        return self.client.api_call("channels.archive", channel=channel_id)
 
-    def add_reminder_hours(self, user, msg, offset):
+        return self.client.conversations_archive(channel=channel_id)
+
+    @validate_response
+    def add_reminder_hours(self, user: str, msg: str, offset: str) -> SlackResponse:
         """Add a reminder with a given text for the specified user."""
-        return self.client.api_call("reminders.add", text=msg, time="in {} hours".format(offset), user=user)
 
-    def get_reminders(self):
+        return self.client.reminders_add(text=msg, time=f"in {offset} hours", user=user)
+
+    @validate_response
+    def get_reminders(self) -> SlackResponse:
         """Retrieve all reminders created by the bot."""
-        return self.client.api_call("reminders.list")
 
-    def remove_reminder(self, reminder_id):
-        return self.client.api_call("reminders.delete", reminder=reminder_id)
+        return self.client.reminders_list()
 
-    def remove_reminders_by_text(self, text):
+    @validate_response
+    def remove_reminder(self, reminder_id: str) -> SlackResponse:
+
+        return self.client.reminders_delete(reminder=reminder_id)
+
+    def remove_reminders_by_text(self, text: str):
         """Remove all reminders that contain the specified text."""
         reminders = self.get_reminders()
 
-        if reminders and "reminders" in reminders:
-            for reminder in reminders["reminders"]:
-                if text in reminder["text"]:
-                    self.remove_reminder(reminder["id"])
+        for reminder in reminders.get("reminders", []):
+            if text in reminder["text"]:
+                self.remove_reminder(reminder["id"])
